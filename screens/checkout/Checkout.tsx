@@ -13,7 +13,8 @@ import { useLocalSearchParams, router } from "expo-router";
 import { RadioButtonProps, RadioGroup } from "react-native-radio-buttons-group";
 import ToggleSwitch from "toggle-switch-react-native";
 import { KeyboardAwareScrollView } from "react-native-keyboard-aware-scroll-view";
-import { WalletConnectModal } from "@walletconnect/modal-react-native";
+import * as Clipboard from "expo-clipboard";
+import { useWalletConnectModal, WalletConnectModal } from '@walletconnect/modal-react-native';
 import _sum from "lodash/sum";
 import _trim from "lodash/trim";
 import _subtract from "lodash/subtract";
@@ -31,6 +32,7 @@ import { eSimOderCheckout, validateCoupon } from "@/services/esims";
 import CheckoutSuccessModal from "@/components/ui/CheckoutSuccessModal";
 import WalletSetupModal from "@/components/ui/WalletSetupModal";
 import CreditCardModal from "@/components/CreditCardModal";
+import WalletConnectConfig from '@/config/walletConnect'
 
 import { openBrowserAsync } from "expo-web-browser";
 import { createRadioButtons } from "./checkout.helpers";
@@ -50,12 +52,19 @@ const RADIO_WIDTH = SCREEN_WIDTH - 24;
 const Checkout = ({ currentBalance = 25 }: any) => {
   const { item: eSimDetails } = useLocalSearchParams();
   const {
-    isConnecting,
-    externalAddress,
-    payViaExternalWallet,
+    isConnecting, // Not needed ?
+    // externalAddress, // replaced with walletConnectModalAddress !
+    // payViaExternalWallet, // Not needed !
     connectExternalWallet,
     disconnectExternalWallet
   } = useWalletConnect();
+
+  const { 
+    isConnected: payViaExternalWallet, 
+    provider, 
+    open, 
+    address: externalAddress 
+  } = useWalletConnectModal();
 
   const eSimItem: Esim = React.useMemo(() => {
     if (typeof eSimDetails === "string") {
@@ -241,11 +250,17 @@ const Checkout = ({ currentBalance = 25 }: any) => {
         await openBrowserAsync(redirect);
       }
 
-      const transactionHash = await payWithUSDC({
-        amountInUsd: totalAmount as number,
-        fromAddress: externalAddress,
-        topic: activeSession.topic
-      });
+      let transactionHash;
+      try{
+        transactionHash = await payWithUSDC({
+          amountInUsd: totalAmount as number,
+          fromAddress: externalAddress,
+          topic: activeSession.topic
+        });
+      }catch(err){
+        console.log('payWithUSDC err', err);
+        return;
+      }
 
       console.log("--- Transaction Successful ---");
       console.log("Transaction Hash:", transactionHash);
@@ -276,7 +291,7 @@ const Checkout = ({ currentBalance = 25 }: any) => {
     } finally {
       setIsCheckoutLoading(false);
     }
-  }, [totalAmount, , externalAddress, kokio.userWallet, discountCode]);
+  }, [totalAmount, externalAddress, kokio.userWallet, discountCode]); 
 
   const handleCheckout = useCallback(async () => {
     console.log("handleCheckout triggered");
@@ -435,6 +450,21 @@ const Checkout = ({ currentBalance = 25 }: any) => {
     payViaExternalWallet,
   ]);
 
+  const onConnect = () => {
+    if (payViaExternalWallet) {
+      return provider?.disconnect();
+    }
+    return open();
+  };
+
+  const onCopy = async (value: string) => {
+    try {
+      await Clipboard.setStringAsync(value);
+    } catch (error) {
+      console.error("Error copying to clipboard:", error);
+    }
+  };
+
   return (
     <View style={styles.container}>
       <KeyboardAwareScrollView
@@ -527,13 +557,7 @@ const Checkout = ({ currentBalance = 25 }: any) => {
             <View style={styles.toggleLeftSide}>
               <ToggleSwitch
                 isOn={payViaExternalWallet}
-                onToggle={async (isOn) => {
-                  if (isOn) {
-                    await connectExternalWallet();
-                  } else {
-                    await disconnectExternalWallet();
-                  }
-                }}
+                onToggle={onConnect}
                 onColor="#30D158"
                 offColor={Theme.colors.muted}
                 size="small"
@@ -560,6 +584,13 @@ const Checkout = ({ currentBalance = 25 }: any) => {
             </Text>
           )}
         </View>
+
+        <WalletConnectModal
+          projectId={WalletConnectConfig.PROJECT_ID}
+          providerMetadata={WalletConnectConfig.providerMetadata}
+          sessionParams={WalletConnectConfig.sessionParams}
+          onCopyClipboard={onCopy}
+        />
 
         <View style={{ marginTop: 16 }}>
           <ThemedText>Fund Device Wallet</ThemedText>
@@ -607,7 +638,6 @@ const Checkout = ({ currentBalance = 25 }: any) => {
         visible={showWalletSetupModal}
         onClose={handleWalletModalClose}
         onContinue={() => {
-          // TODO: Loader for Wallet
           handleWalletModalClose();
           setSelectedPaymentMethod(RADIO_KEYS.E_SIM_WALLET);
         }}
