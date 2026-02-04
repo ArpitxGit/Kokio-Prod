@@ -188,13 +188,20 @@ const Checkout = ({ currentBalance = 25 }: any) => {
   const payWithUSDC = async (params: {
     amountInUsd: number;
     fromAddress: string;
-    topic: string;
+    // topic: string;
+    provider:any;
   }) => {
     // TODO: Update to mainnet during production
     const BASE_SEPOLIA_USDC_ADDRESS = "0x6Ac3aB54Dc5019A2e57eCcb214337FF5bbD52897";
     const toAddress = extra.kokioVaultAddress || "0x";
+
+    // const chainId = await provider.request({
+    //   method: 'eth_chainId',
+    // });
+
     const chainId = WC_BASE_SEPOLIA;
-    const { amountInUsd, fromAddress, topic } = params;
+    // const { amountInUsd, fromAddress, topic } = params;
+    const { amountInUsd, fromAddress, provider } = params;
     const signClient = await getSignClient();
 
     // Converting to USDC Units (6 decimals)
@@ -215,47 +222,71 @@ const Checkout = ({ currentBalance = 25 }: any) => {
     console.log("To (Kokio vault): ", extra.kokioVaultAddress);
     console.log(`${amountInUsd}USD ==>${cleanAmount}`);
 
-    // 3. Request Transaction
-    return await signClient.request({
-      topic,
-      chainId,
-      request: {
-        method: "eth_sendTransaction",
-        params: [{
+    // // 3. Request Transaction
+    // return await signClient.request({
+    //   topic,
+    //   chainId,
+    //   request: {
+    //     method: "eth_sendTransaction",
+    //     params: [{
+    //       from: fromAddress,
+    //       to: BASE_SEPOLIA_USDC_ADDRESS, 
+    //       data: transactionData,
+    //       value: "0x0", 
+    //     }],
+    //   },
+    // });
+  
+  // 3. Request Transaction
+    return await provider.request({
+      method: "eth_sendTransaction",
+      params: [{
           from: fromAddress,
           to: BASE_SEPOLIA_USDC_ADDRESS, 
           data: transactionData,
           value: "0x0", 
         }],
-      },
     });
   };
+
 
   const handleExternalWalletCheckout = useCallback(async () => {
     try {
       setIsCheckoutLoading(true);
 
-      const signClient = await getSignClient();
-      const sessions = signClient.session.getAll();
-      if (sessions.length === 0 || !externalAddress) {
-        // TODO: remove alert
-        alert("No active wallet session. Please reconnect your wallet.");
+      if (!provider || typeof provider.request !== "function") {
+        console.error("Wallet provider not ready", provider);
+        alert("Wallet not ready yet. Please try again.");
+        return;
+      }
+      
+      if (!externalAddress) {
+        alert("Wallet address missing");
         return;
       }
 
-      const activeSession = sessions[0];
-      // Trigger deeplink to the wallet app
-      const redirect = activeSession.peer.metadata.redirect?.native;
-      if (redirect) {
-        await openBrowserAsync(redirect);
-      }
+      // const signClient = await getSignClient();
+      // const sessions = signClient.session.getAll();
+      // if (sessions.length === 0 || !externalAddress) {
+      //   // TODO: remove alert
+      //   alert("No active wallet session. Please reconnect your wallet.");
+      //   return;
+      // }
+
+      // const activeSession = sessions[0];
+      // // Trigger deeplink to the wallet app
+      // const redirect = activeSession.peer.metadata.redirect?.native;
+      // if (redirect) {
+      //   await openBrowserAsync(redirect);
+      // }
 
       let transactionHash;
       try{
         transactionHash = await payWithUSDC({
           amountInUsd: totalAmount as number,
           fromAddress: externalAddress,
-          topic: activeSession.topic
+          // topic: activeSession.topic
+          provider
         });
       }catch(err){
         console.log('payWithUSDC err', err);
@@ -291,7 +322,9 @@ const Checkout = ({ currentBalance = 25 }: any) => {
     } finally {
       setIsCheckoutLoading(false);
     }
-  }, [totalAmount, externalAddress, kokio.userWallet, discountCode]); 
+  // }, [totalAmount, externalAddress, kokio.userWallet, discountCode]); 
+  }, [provider, externalAddress, totalAmount]);
+
 
   const handleCheckout = useCallback(async () => {
     console.log("handleCheckout triggered");
@@ -450,11 +483,16 @@ const Checkout = ({ currentBalance = 25 }: any) => {
     payViaExternalWallet,
   ]);
 
-  const onConnect = () => {
-    if (payViaExternalWallet) {
-      return provider?.disconnect();
+  const onConnect = async () => {
+    try {
+      if (payViaExternalWallet) {
+        return provider?.disconnect();
+      } else {
+        await open();
+      }
+    } catch (e) {
+      console.log("External wallet connect issues", e);
     }
-    return open();
   };
 
   const onCopy = async (value: string) => {

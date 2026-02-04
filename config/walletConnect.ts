@@ -21,6 +21,7 @@ const sessionParams = {
   namespaces: {
     eip155: {
       chains: [WC_BASE_SEPOLIA],
+      optionalChains: [],
       methods: ["personal_sign", "eth_sendTransaction"],
       events: ["accountsChanged", "chainChanged"],
       rpcMap: {},
